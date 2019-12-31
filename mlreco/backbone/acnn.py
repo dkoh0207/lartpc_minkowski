@@ -2,11 +2,9 @@ import torch
 from torch.nn import Module
 
 # For MinkowskiEngine
-import ROOT
-ROOT.gSystem.Load("/usr/local/cuda/lib64/libcusparse.so")
 import MinkowskiEngine as ME
 
-from mlreco.utils.misc import AtrousIIBlock
+from mlreco.layers.misc import AtrousIIBlock
 from mlreco.layers.network_base import NetworkBase
 
 

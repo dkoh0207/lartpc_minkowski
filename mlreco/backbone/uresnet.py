@@ -1,13 +1,11 @@
 import numpy as np
 import torch
-import torch.nn
+import torch.nn as nn
 
-import ROOT
-ROOT.gSystem.Load("/usr/local/cuda/lib64/libcusparse.so")
 import MinkowskiEngine as ME
 import MinkowskiFunctional as MF
 
-from mlreco.utils.misc import ResNetBlock, MinkowskiLeakyReLU
+from mlreco.layers.misc import ResNetBlock, MinkowskiLeakyReLU
 from mlreco.layers.network_base import NetworkBase
 
 class UResNet(NetworkBase):
@@ -28,18 +26,24 @@ class UResNet(NetworkBase):
     input_kernel : int, optional
         Receptive field size for very first convolution after input layer.
     '''
-    def __init__(self, model_cfg, name='uresnet'):
-        super(UResNet, NetworkBase).__init__(model_cfg)
-        cfg = model_cfg[name]
+    def __init__(self, cfg, name='uresnet'):
+        super(UResNet, self).__init__(cfg)
+        model_cfg = cfg['modules'][name]
 
         # UResNet Configurations
-        self.reps = cfg.get('reps', 2)
-        self.depth = cfg.get('depth', 5)
-        self.num_filters = cfg.get('num_filters', 16)
+        self.reps = model_cfg.get('reps', 2)
+        self.depth = model_cfg.get('depth', 5)
+        self.num_filters = model_cfg.get('num_filters', 16)
         self.nPlanes = [i * self.num_filters for i in range(1, self.depth+1)]
         # self.kernel_size = cfg.get('kernel_size', 3)
         # self.downsample = cfg.get(downsample, 2)
-        self.input_kernel = cfg.get('input_kernel', 3)
+        self.input_kernel = model_cfg.get('input_kernel', 3)
+
+        # Initialize Input Layer
+        self.input_layer = ME.MinkowskiConvolution(
+            in_channels=self.num_input,
+            out_channels=self.num_filters,
+            kernel_size=3, stride=1, dimension=self.D)
 
         # Initialize Encoder
         self.encoding_conv = []
@@ -54,7 +58,7 @@ class UResNet(NetworkBase):
             m = []
             if i < self.depth-1:
                 m.append(ME.MinkowskiBatchNorm(F))
-                m.append(MinkowskiLeakyReLU(F, negative_slope=self.leakiness))
+                m.append(MinkowskiLeakyReLU(negative_slope=self.leakiness))
                 m.append(ME.MinkowskiConvolution(
                     in_channels=self.nPlanes[i],
                     out_channels=self.nPlanes[i+1],
@@ -69,12 +73,11 @@ class UResNet(NetworkBase):
         self.decoding_conv = []
         for i in range(self.depth-2, -1, -1):
             m = []
-            m.append(ME.MinkowskiBatchNorm(self.nPlanes[i]))
-            m.append(MinkowskiLeakyReLU(self.nPlanes[i],
-                                        negative_slope=self.leakiness))
+            m.append(ME.MinkowskiBatchNorm(self.nPlanes[i+1]))
+            m.append(MinkowskiLeakyReLU(negative_slope=self.leakiness))
             m.append(ME.MinkowskiConvolutionTranspose(
-                in_channels=self.nPlanes[i],
-                out_channels=self.nPlanes[i-1],
+                in_channels=self.nPlanes[i+1],
+                out_channels=self.nPlanes[i],
                 kernel_size=2,
                 stride=2,
                 dimension=self.D))
@@ -88,6 +91,8 @@ class UResNet(NetworkBase):
                                      leakiness=self.leakiness))
             m = nn.Sequential(*m)
             self.decoding_block.append(m)
+        self.decoding_block = nn.Sequential(*self.decoding_block)
+        self.decoding_conv = nn.Sequential(*self.decoding_conv)
 
 
     def encoder(self, x):
@@ -104,10 +109,11 @@ class UResNet(NetworkBase):
               2) finalTensor (SparseTensor): feature tensor at
               deepest layer.
         '''
+        x = self.input_layer(x)
         encoderTensors = [x]
         for i, layer in enumerate(self.encoding_block):
             x = self.encoding_block[i](x)
-            encoderFeatures.append(x)
+            encoderTensors.append(x)
             x = self.encoding_conv[i](x)
 
         result = {
@@ -134,19 +140,20 @@ class UResNet(NetworkBase):
             x = ME.cat((eTensor, x))
             x = self.decoding_block[i](x)
             decoderTensors.append(x)
-        return {"decoderTensors": decoderTensors}
+        return decoderTensors
 
     def forward(self, input):
-        coords = input[:, 0:self.dimension+1].int()
-        features = input[:, self.dimension+1:].float()
+        coords = input[:, 0:self.D+1].cpu().int()
+        features = input[:, self.D+1:].float()
 
-        x = SparseTensor(features, coords=coords)
+        x = ME.SparseTensor(features, coords=coords)
         encoderOutput = self.encoder(x)
         encoderTensors = encoderOutput['encoderTensors']
         finalTensor = encoderOutput['finalTensor']
         decoderTensors = self.decoder(finalTensor, encoderTensors)
 
         res = {
-            'encoderTensors': [encoderTensors],
-            'decoderTensors': [decoderTensors]
+            'encoderTensors': encoderTensors,
+            'decoderTensors': decoderTensors
         }
+        return res

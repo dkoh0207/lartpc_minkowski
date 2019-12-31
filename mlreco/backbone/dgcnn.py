@@ -2,8 +2,6 @@ import numpy as np
 import torch
 import torch.nn
 
-import ROOT
-ROOT.gSystem.Load("/usr/local/cuda/lib64/libcusparse.so")
 import MinkowskiEngine as ME
 import MinkowskiFunctional as MF
 

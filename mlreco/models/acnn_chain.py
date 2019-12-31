@@ -5,27 +5,28 @@ import torch.nn as nn
 import MinkowskiEngine as ME
 import MinkowskiFunctional as MF
 
-from mlreco.nn.backbone.uresnet import UResNet
+from mlreco.nn.backbone.acnn import ACNN
 from collections import defaultdict
 
-class UResNet_Chain(nn.Module):
+class ACNN_Chain(nn.Module):
 
-    def __init__(self, cfg, name='uresnet_chain'):
-        super(UResNet_Chain, self).__init__()
-        self.model_cfg = cfg
-        self.net = UResNet(cfg, name='uresnet')
-        self.F = self.model_cfg.get('num_filters', 16)
+    def __init__(self, cfg, name='acnn'):
+        super(ACNN_Chain, self).__init__()
+        self.model_cfg = cfg['modules'][name]
+        self.net = ACNN(cfg, name='acnn')
         self.num_classes = self.model_cfg.get('num_classes', 5)
-        self.segmentation = ME.MinkowskiLinear(self.F, self.num_classes)
+        self.segmentation = ME.MinkowskiLinear(self.net.outputFeatures,
+                                               self.num_classes)
+        print('Total Number of Trainable Parameters = {}'.format(
+            sum(p.numel() for p in self.parameters() if p.requires_grad)))
 
     def forward(self, input):
         out = defaultdict(list)
         num_gpus = len(input)
         for igpu, x in enumerate(input):
             res = self.net(x)
-            seg = res['decoderTensors'][-1]
-            seg = self.segmentation(seg)
-            out['segmentation'].append(seg.F)
+            res = self.segmentation(res)
+            out['segmentation'].append(res.F)
         return out
 
 class SegmentationLoss(nn.Module):

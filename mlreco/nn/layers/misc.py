@@ -114,11 +114,11 @@ class AtrousIIBlock(Module):
         self.conv1 = ME.MinkowskiConvolution(
             in_features, out_features,
             kernel_size=3, stride=1, dilation=1, dimension=self.D)
-        self.norm1 = ME.MinkowskiInstanceNorm(out_features)
-        self.conv1 = ME.MinkowskiConvolution(
+        self.norm1 = ME.MinkowskiInstanceNorm(out_features, dimension=self.D)
+        self.conv2 = ME.MinkowskiConvolution(
             out_features, out_features,
             kernel_size=3, stride=1, dilation=3, dimension=self.D)
-        self.norm2 = ME.MinkowskiInstanceNorm(out_features)
+        self.norm2 = ME.MinkowskiInstanceNorm(out_features, dimension=self.D)
         self.leaky_relu = MinkowskiLeakyReLU(negative_slope=leakiness)
 
     def forward(self, x):

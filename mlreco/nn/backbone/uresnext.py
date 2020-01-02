@@ -91,7 +91,7 @@ class UResNeXt(NetworkBase):
 
     def encoder(self, x):
         '''
-        DeepLabPP Encoder.
+        UResNeXt Encoder.
 
         INPUTS:
             - x (SparseTensor): MinkowskiEngine SparseTensor
@@ -118,7 +118,7 @@ class UResNeXt(NetworkBase):
 
     def decoder(self, final, encoderTensors):
         '''
-        DeepLabPP Decoder
+        UResNeXt Decoder
 
         INPUTS:
             - encoderTensors (list of SparseTensor): output of encoder.

@@ -20,7 +20,8 @@ class LArCVDataset(Dataset):
 
     The assumption is that each data chunk respects the LArCV event boundary.
     """
-    def __init__(self, data_schema, data_keys, limit_num_files=0, limit_num_samples=0, event_list=None):
+    def __init__(self, data_schema, data_keys,
+                 limit_num_files=0, limit_num_samples=0, event_list=None):
         """
         INPUTS:
             - data_dirs: A list of data directories to find files
@@ -28,13 +29,20 @@ class LArCVDataset(Dataset):
 
             - data_schema: A dictionary of string <=> list of strings.
                 The key is a unique name of a data chunk in a batch.
-                The list must be length >= 2: the first string names the parser
-                function, and the rest of strings identifies data keys in the input files.
+                The list must be length >= 2: the first string names
+                the parser function, and the rest of strings identifies
+                data keys in the input files.
 
             - data_key: a string that is required to be present in the filename
-            - limit_num_files: an integer limiting number of files to be taken per data directory
-            - limit_num_samples: an integer limiting number of samples to be taken per data
-            - event_list: a list of integers to specify which event (ttree index) to process
+
+            - limit_num_files: an integer limiting number of files to be
+                taken per data directory
+
+            - limit_num_samples: an integer limiting number of samples
+                to be taken per data
+
+            - event_list: a list of integers to specify which
+                event (ttree index) to process
         """
 
         # Create file list
@@ -59,12 +67,14 @@ class LArCVDataset(Dataset):
         self._trees = {}
         for key, value in data_schema.items():
             if len(value) < 2:
-                print('iotools.datasets.schema contains a key %s with list length < 2!' % key)
+                print('iotools.datasets.schema contains a key \
+                    %s with list length < 2!' % key)
                 raise ValueError
             if not hasattr(mlreco.iotools.parsers,value[0]):
                 print('The specified parser name %s does not exist!' % value[0])
             self._data_keys.append(key)
-            self._data_parsers.append((getattr(mlreco.iotools.parsers,value[0]),value[1:]))
+            self._data_parsers.append(
+                (getattr(mlreco.iotools.parsers,value[0]),value[1:]))
             for data_key in value[1:]:
                 if data_key in self._trees: continue
                 self._trees[data_key] = None
@@ -74,25 +84,30 @@ class LArCVDataset(Dataset):
         from ROOT import TChain
         self._entries = None
         for data_key in self._trees.keys():
-            # Check data TTree exists, and entries are identical across >1 trees.
-            # However do NOT register these TTrees in self._trees yet in order to support >1 workers by DataLoader
+            # Check data TTree exists and entries are identical across >1 trees.
+            # However do NOT register these TTrees in self._trees
+            # yet in order to support >1 workers by DataLoader
             print('Loading tree',data_key)
             chain = TChain(data_key + "_tree")
             for f in self._files:
                 chain.AddFile(f)
-            if self._entries is not None: assert(self._entries == chain.GetEntries())
-            else: self._entries = chain.GetEntries()
+            if self._entries is not None:
+                assert(self._entries == chain.GetEntries())
+            else:
+                self._entries = chain.GetEntries()
 
         # If event list is provided, register
         if event_list is None:
             self._event_list = np.arange(0, self._entries)
         else:
-            if isinstance(event_list,list): event_list = np.array(event_list).astype(np.int32)
+            if isinstance(event_list,list):
+                event_list = np.array(event_list).astype(np.int32)
             assert(len(event_list.shape)==1)
             where = np.where(event_list >= self._entries)
             removed = event_list[where]
             if len(removed):
-                print('WARNING: ignoring some of specified events in event_list as they do not exist in the sample.')
+                print('WARNING: ignoring some of specified events in \
+                    event_list as they do not exist in the sample.')
                 print(removed)
             self._event_list=event_list[np.where(event_list < self._entries)]
             self._entries = len(self._event_list)

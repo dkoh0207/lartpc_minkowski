@@ -21,8 +21,9 @@ class AbstractBatchSampler(Sampler):
 
         self._minibatch_size = int(minibatch_size)
         if self._minibatch_size < 0 or self._minibatch_size > self._data_size:
-            raise ValueError('%s received invalid batch size %d for data size %s',
-                             (self.__class__.__name__, minibatch_size, str(self._data_size)))
+            raise ValueError(
+                '%s received invalid batch size %d for data size %s', \
+                (self.__class__.__name__, minibatch_size, str(self._data_size)))
         # Use an independent random number generator for random sampling
         if seed < 0:
             import time
@@ -36,19 +37,27 @@ class AbstractBatchSampler(Sampler):
 class RandomSequenceSampler(AbstractBatchSampler):
     def __iter__(self):
         starts = self._random.randint(
-            low=0, high=self._data_size - self._minibatch_size, size=(len(self),))
-        return iter(np.concatenate([np.arange(start, start + self._minibatch_size) for start in starts]))
+            low=0,
+            high=self._data_size - self._minibatch_size,
+            size=(len(self),))
+        return iter(np.concatenate(
+            [np.arange(start, start + self._minibatch_size) \
+                for start in starts]))
 
     @staticmethod
     def create(ds, cfg):
-        return RandomSequenceSampler(len(ds), cfg['minibatch_size'], seed=cfg.get('seed', -1))
+        return RandomSequenceSampler(len(ds),
+                                     cfg['minibatch_size'],
+                                     seed=cfg.get('seed', -1))
 
 
 class SequentialBatchSampler(AbstractBatchSampler):
     def __iter__(self):
         starts = np.arange(0, self._data_size -
                            self._minibatch_size, self._minibatch_size)
-        return iter(np.concatenate([np.arange(start, start + self._minibatch_size) for start in starts]))
+        return iter(np.concatenate(
+            [np.arange(start, start + self._minibatch_size) \
+                for start in starts]))
 
     @staticmethod
     def create(ds, cfg):

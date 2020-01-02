@@ -1,11 +1,11 @@
 import numpy as np
 import torch
-import torch.nn
+import torch.nn as nn
 
 import MinkowskiEngine as ME
 import MinkowskiFunctional as MF
 
-from mlreco.nn.layers.misc import ResNetBlock, MinkowskiLeakyReLU, ConcatTable
+from mlreco.nn.layers.misc import ResNetBlock, MinkowskiLeakyReLU
 from mlreco.nn.layers.network_base import NetworkBase
 
 class FPN(NetworkBase):
@@ -30,16 +30,22 @@ class FPN(NetworkBase):
     '''
     def __init__(self, cfg, name='fpn'):
         super(FPN, self).__init__(cfg)
-        cfg = model_cfg[name]
+        model_cfg = cfg['modules'][name]
 
         # UResNet Configurations
-        self.reps = cfg.get('reps', 2)
-        self.depth = cfg.get('depth', 5)
-        self.num_filters = cfg.get('num_filters', 16)
+        self.reps = model_cfg.get('reps', 2)
+        self.depth = model_cfg.get('depth', 5)
+        self.num_filters = model_cfg.get('num_filters', 16)
         self.nPlanes = [i * self.num_filters for i in range(1, self.depth+1)]
         # self.kernel_size = cfg.get('kernel_size', 3)
         # self.downsample = cfg.get(downsample, 2)
-        self.input_kernel = cfg.get('input_kernel', 3)
+        self.input_kernel = model_cfg.get('input_kernel', 3)
+
+        # Initialize Input Layer
+        self.input_layer = ME.MinkowskiConvolution(
+            in_channels=self.num_input,
+            out_channels=self.num_filters,
+            kernel_size=self.input_kernel, stride=1, dimension=self.D)
 
         # Initialize Encoder
         self.encoding_conv = []
@@ -54,7 +60,7 @@ class FPN(NetworkBase):
             m = []
             if i < self.depth-1:
                 m.append(ME.MinkowskiBatchNorm(F))
-                m.append(MinkowskiLeakyReLU(F, negative_slope=self.leakiness))
+                m.append(MinkowskiLeakyReLU(negative_slope=self.leakiness))
                 m.append(ME.MinkowskiConvolution(
                     in_channels=self.nPlanes[i],
                     out_channels=self.nPlanes[i+1],
@@ -66,7 +72,7 @@ class FPN(NetworkBase):
 
         # Lateral Connections
         self.lateral = []
-        for i, F in enumerate(self.nPlanes):
+        for i, F in enumerate(self.nPlanes[-2::-1]):
             self.lateral.append(ME.MinkowskiLinear(F, F))
         self.lateral = nn.Sequential(*self.lateral)
 
@@ -75,12 +81,11 @@ class FPN(NetworkBase):
         self.decoding_conv = []
         for i in range(self.depth-2, -1, -1):
             m = []
-            m.append(ME.MinkowskiBatchNorm(self.nPlanes[i]))
-            m.append(MinkowskiLeakyReLU(self.nPlanes[i],
-                                        negative_slope=self.leakiness))
+            m.append(ME.MinkowskiBatchNorm(self.nPlanes[i+1]))
+            m.append(MinkowskiLeakyReLU(negative_slope=self.leakiness))
             m.append(ME.MinkowskiConvolutionTranspose(
-                in_channels=self.nPlanes[i],
-                out_channels=self.nPlanes[i-1],
+                in_channels=self.nPlanes[i+1],
+                out_channels=self.nPlanes[i],
                 kernel_size=2,
                 stride=2,
                 dimension=self.D))
@@ -94,11 +99,16 @@ class FPN(NetworkBase):
                                      leakiness=self.leakiness))
             m = nn.Sequential(*m)
             self.decoding_block.append(m)
+        self.decoding_block = nn.Sequential(*self.decoding_block)
+        self.decoding_conv = nn.Sequential(*self.decoding_conv)
+
+        print('Total Number of Trainable Parameters = {}'.format(
+            sum(p.numel() for p in self.parameters() if p.requires_grad)))
 
 
     def encoder(self, x):
         '''
-        Vanilla UResNet Encoder.
+        Vanilla FPN Encoder.
 
         INPUTS:
             - x (SparseTensor): MinkowskiEngine SparseTensor
@@ -110,10 +120,11 @@ class FPN(NetworkBase):
               2) finalTensor (SparseTensor): feature tensor at
               deepest layer.
         '''
+        x = self.input_layer(x)
         encoderTensors = [x]
         for i, layer in enumerate(self.encoding_block):
             x = self.encoding_block[i](x)
-            encoderFeatures.append(x)
+            encoderTensors.append(x)
             x = self.encoding_conv[i](x)
 
         result = {
@@ -125,7 +136,7 @@ class FPN(NetworkBase):
 
     def decoder(self, final, encoderTensors):
         '''
-        Vanilla UResNet Decoder
+        Vanilla FPN Decoder
         INPUTS:
             - encoderTensors (list of SparseTensor): output of encoder.
         RETURNS:
@@ -140,19 +151,20 @@ class FPN(NetworkBase):
             x += self.lateral[i](eTensor)
             x = self.decoding_block[i](x)
             decoderTensors.append(x)
-        return {"decoderTensors": decoderTensors}
+        return decoderTensors
 
     def forward(self, input):
-        coords = input[:, 0:self.dimension+1].int()
-        features = input[:, self.dimension+1:].float()
+        coords = input[:, 0:self.D+1].cpu().int()
+        features = input[:, self.D+1:].float()
 
-        x = SparseTensor(features, coords=coords)
+        x = ME.SparseTensor(features, coords=coords)
         encoderOutput = self.encoder(x)
         encoderTensors = encoderOutput['encoderTensors']
         finalTensor = encoderOutput['finalTensor']
         decoderTensors = self.decoder(finalTensor, encoderTensors)
 
         res = {
-            'encoderTensors': [encoderTensors],
-            'decoderTensors': [decoderTensors]
+            'encoderTensors': encoderTensors,
+            'decoderTensors': decoderTensors
         }
+        return res

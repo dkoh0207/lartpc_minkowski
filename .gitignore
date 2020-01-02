@@ -5,3 +5,4 @@ config/
 *.cfg
 *__pycache__
 *.py~
+log/

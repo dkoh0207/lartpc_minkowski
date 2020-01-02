@@ -18,43 +18,6 @@ class Identity(nn.Module):
         return input
 
 
-class ConcatTable(nn.Module):
-    '''
-    Util function for concatenating feature planes of sparse tensors.
-    '''
-
-    def __init__(self, D=3):
-        super(ConcatTable, self).__init__()
-
-    def forward(self, x, y):
-        '''
-        WARNING: Input coordinates of x and y must agree exactly!
-        '''
-        outputFeatures = [x.F, y.F]
-        outputFeatures = torch.cat(outputFeatures, dim=1)
-        coords = x.C
-        output = SparseTensor(outputFeatures, coords=coords)
-        return output
-
-
-class AddTable(nn.Module):
-    '''
-    Util function for adding feature planes of sparse tensors.
-    '''
-
-    def __init__(self, D=3):
-        super(AddTable, self).__init__()
-
-    def forward(self, x, y):
-        '''
-        WARNING: Input coordinates AND dimensions of x and y must agree exactly!
-        '''
-        outputFeatures = x.F + y.F
-        coords = x.coords
-        output = SparseTensor(outputFeatures, coords=coords)
-        return output
-
-
 class ResNetBlock(nn.Module):
     '''
     ResNet Block with Leaky ReLU nonlinearities.
@@ -251,17 +214,96 @@ class ResNeXtBlock(nn.Module):
 
 class SPP(nn.Module):
     '''
-    Spatial Pyramid Pooling Module
+    Spatial Pyramid Pooling Module. Supports atrous convolutions.
+    PSPNet (Pyramid Scene Parsing Network) uses vanilla SPPs, while
+    DeeplabV3 and DeeplabV3+ uses ASPP (atrous versions).
+
+    Default parameters will construct a global average pooling + unpooling
+    layer which is done in ParseNet.
+
+    CONFIGURATIONS:
+    -------------------------------------------------------
+        - in_features (int): number of input features
+
+        - out_features (int): number of output features
+
+        - D (int): dimension of dataset.
+
+        - mode (str): pooling mode. In MinkowskiEngine, currently
+        'avg', 'max', and 'sum' are supported.
+
+        - dilations (int or list of ints): dilation rates for atrous
+        convolutions.
+
+        - kernel_sizes (int or list of ints): kernel sizes for each
+        pooling operation. Note that kernel_size == stride for the SPP layer.
+    -------------------------------------------------------
     '''
 
-    def __init__(self):
+    def __init__(self, in_features, out_features,
+                 kernel_sizes=None, dilations=None, mode='avg', D=3):
+        super(SPP, self).__init__()
+        if mode == 'avg':
+            self.pool_fn = ME.MinkowskiAvgPooling
+        elif mode == 'max':
+            self.pool_fn = ME.MinkowskiMaxPooling
+        elif mode == 'sum':
+            self.pool_fn = ME.MinkowskiSumPooling
+        else:
+            raise ValueError("Invalid pooling mode, must be one of \
+                'sum', 'max' or 'average'")
+        self.unpool_fn = ME.MinkowskiPoolingTranspose
+
+        # Include global pooling as first modules.
+        self.pool = [ME.MinkowskiGlobalPooling(dimension=D)]
+        self.unpool = [ME.MinkowskiBroadcast(dimension=D)]
+        multiplier = 1
+        # Define subregion poolings
+        self.spp = []
+        if kernel_sizes is not None:
+            if isinstance(dilations, int):
+                dilations = [dilations for _ in range(len(kernel_sizes))]
+            elif isinstance(dilations, list):
+                assert len(kernel_sizes) == len(dilations)
+            else:
+                raise ValueError("Invalid input to dilations, must be either \
+                    int or list of ints")
+            multiplier = len(kernel_sizes) + 1  # Additional 1 for globalPool
+            for k, d in zip(kernel_sizes, dilations):
+                pooling_layer = self.pool_fn(
+                    kernel_size=k, dilation=d, stride=k, dimension=D)
+                unpooling_layer = self.unpool_fn(
+                    kernel_size=k, dilation=d, stride=k, dimension=D)
+                self.pool.append(pooling_layer)
+                self.unpool.append(unpooling_layer)
+        self.pool = nn.Sequential(*self.pool)
+        self.unpool = nn.Sequential(*self.unpool)
+        self.linear = ME.MinkowskiLinear(in_features * multiplier, out_features)
+
+    def forward(self, input):
+
+        cat = []
+        for i, pool in enumerate(self.pool):
+            x = pool(input)
+            # First item is Global Pooling
+            if i == 0:
+                x = self.unpool[i](input, x)
+            else:
+                x = self.unpool[i](x)
+            cat.append(x)
+        out = ME.cat(cat)
+        out = self.linear(out)
+
+        return out
+
+
+class DepthwiseConv(nn.Module):
+
+    def __init__(self, in_features, out_features):
         pass
 
-
-class ASPP(nn.Module):
-    '''
-    Atrous Spatial Pyramid Pooling Module
-    '''
+# TODO
+class DenseASPP(nn.Module):
 
     def __init__(self):
         pass

@@ -7,7 +7,6 @@ import MinkowskiEngine as ME
 from mlreco.nn.layers.misc import AtrousIIBlock
 from mlreco.nn.layers.network_base import NetworkBase
 
-
 class ACNN(NetworkBase):
     '''
     <ACNN: a Full Resolution DCNN for Medical Image Segmentation>
